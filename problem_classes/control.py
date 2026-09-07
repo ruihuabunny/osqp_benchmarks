@@ -34,9 +34,18 @@ class ControlExample(object):
                 lambda_values[i] / (abs_lambda_values[i] + 1e-02)
 
         # Reconstruct A = V * Lambda * V^{-1}
-        self.A = spa.csc_matrix(
-            V.dot(np.diag(lambda_values)).dot(np.linalg.inv(V)).real
-            )
+        cond_V = np.linalg.cond(V)
+
+        if cond_V > 1e10:
+            print(f"Warning: eigenvector matrix is ill-conditioned: {cond_V:.2e}")
+
+        M = V @ np.diag(lambda_values)
+
+        A_new = np.linalg.solve(V.T, M.T).T
+
+        A_new = np.real_if_close(A_new)
+
+        self.A = spa.csc_matrix(A_new)
 
         self.B = spa.random(self.nx, self.nu, density=1.0,
                             data_rvs=np.random.randn)
