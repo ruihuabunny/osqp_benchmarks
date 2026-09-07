@@ -103,9 +103,9 @@ class PortfolioExample(object):
 
         objective = cvxpy.Minimize(cvxpy.quad_form(x, self.D) +
                                    cvxpy.quad_form(y, spa.eye(self.k)) +
-                                   - 1 / self.gamma * (mu.T * x))
-        constraints = [np.ones(self.n) * x == 1,
-                       self.F.T * x == y,
+                                   - 1 / self.gamma * (mu.T @ x))
+        constraints = [cvxpy.sum(x) == 1,
+                       self.F.T @ x == y,
                        0 <= x, x <= 1]
         problem = cvxpy.Problem(objective, constraints)
 

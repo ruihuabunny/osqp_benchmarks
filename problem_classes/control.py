@@ -190,7 +190,7 @@ class ControlExample(object):
         # Dynamics
         dynamics = [x[:, 0] == x0]
         for i in range(T):
-            dynamics += [x[:, i+1] == self.A * x[:, i] + self.B * u[:, i]]
+            dynamics += [x[:, i+1] == self.A @ x[:, i] + self.B @ u[:, i]]
 
         # State constraints
         state_constraints = []
@@ -218,8 +218,8 @@ class ControlExample(object):
         T = self.T
 
         # primal solution
-        x = np.concatenate((cvxpy.vec(x_cvx).value,
-                            cvxpy.vec(u_cvx).value))
+        x = np.concatenate((cvxpy.vec(x_cvx, order='F').value,
+                            cvxpy.vec(u_cvx, order='F').value))
 
         # dual solution
         constraint_values = [constr.dual_value for constr in constraints]

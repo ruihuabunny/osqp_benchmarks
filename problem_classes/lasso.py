@@ -77,13 +77,13 @@ class LassoExample(object):
         y = cvxpy.Variable(self.m)
         t = cvxpy.Variable(self.n)
 
-        # Create parameeter and assign value
-        lambda_cvxpy = cvxpy.Parameter()
+        # Use the parameter in the objective so update_lambda updates both forms.
+        lambda_cvxpy = cvxpy.Parameter(nonneg=True)
         lambda_cvxpy.value = self.lambda_param
 
         objective = cvxpy.Minimize(cvxpy.quad_form(y, spa.eye(self.m))
-                                   + self.lambda_param * (np.ones(self.n) * t))
-        constraints = [y == self.Ad * x - self.bd,
+                                   + lambda_cvxpy * cvxpy.sum(t))
+        constraints = [y == self.Ad @ x - self.bd,
                        -t <= x, x <= t]
         problem = cvxpy.Problem(objective, constraints)
 
@@ -113,12 +113,12 @@ class LassoExample(object):
         """
         Update lambda value in inner problems
         """
+        # Validate the parameter before changing the QP data.
+        self.cvxpy_param.value = lambda_new
+
         # Update internal lambda parameter
         self.lambda_param = lambda_new
 
         # Update q in QP problem
         self.qp_problem['q'] = np.append(np.zeros(self.m + self.n),
                                          self.lambda_param * np.ones(self.n))
-
-        # Update parameter in CVXPY problem
-        self.cvxpy_param.value = self.lambda_param
