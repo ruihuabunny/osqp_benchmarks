@@ -46,7 +46,10 @@ CHECK_TOL = 5e-6
 
 
 def qp_fingerprint(qp):
-    """Hash all QP fields, normalizing sparse storage without making it dense."""
+    """
+    Hash all QP fields, normalizing sparse storage without making it dense.
+    Return a fingerprint for comparing the supplied QP data.
+    """
     digest = hashlib.sha256()
     for key in sorted(qp):
         value = qp[key]
@@ -68,6 +71,11 @@ def qp_fingerprint(qp):
 
 
 def validate_qp(qp):
+    """
+    Check QP shapes, sparse storage, numeric values, bounds, and P symmetry.
+
+    If split variable bounds are present, check that they reconstruct A, l, u.
+    """
     n, m = qp['n'], qp['m']
     for key, shape in (('P', (n, n)), ('A', (m, n))):
         matrix = qp[key]
@@ -101,7 +109,12 @@ def validate_qp(qp):
 
 
 def residuals(qp, x, y):
-    """Independently check feasibility, stationarity, and complementarity."""
+    """
+    Independently check QP feasibility, stationarity, and complementarity.
+
+    Validate primal/dual solution shapes and finite values, enforce CHECK_TOL
+    on scaled residuals, and return both absolute and scaled residuals.
+    """
     x, y = np.asarray(x), np.asarray(y)
     assert x.shape == (qp['n'],) and y.shape == (qp['m'],)
     assert np.isfinite(x).all() and np.isfinite(y).all()
@@ -123,6 +136,13 @@ def residuals(qp, x, y):
 
 
 def solve_and_check(example):
+    """
+    Solve with OSQP directly and through CVXPY, then check both results.
+
+    Validate the QP and CVXPY DCP model, check solver statuses and residuals,
+    and compare scaled objective differences after mapping the CVXPY solution
+    back to the original QP variable and constraint order.
+    """
     qp = example.qp_problem
     validate_qp(qp)
     assert example.cvxpy_problem.is_dcp(), 'CVXPY model is not DCP'
@@ -156,6 +176,12 @@ def solve_and_check(example):
 
 
 def run_case(cls, size, seed):
+    """
+    Generate and validate one (class, size, seed) configuration.
+
+    Check same-seed equality and changed-seed differences, then solve the
+    instance. For Control, also check dynamics stability and x0 bounds.
+    """
     started = perf_counter()
     example = cls(size, seed=seed)
     generate_seconds = perf_counter() - started
@@ -174,6 +200,12 @@ def run_case(cls, size, seed):
 
 
 def run_update(name):
+    """
+    Solve and validate an instance before and after a named parameter update.
+
+    Check that the QP changes and matches a rebuild from current attributes.
+    For Lasso, also check that a negative lambda is rejected without mutation.
+    """
     if name == 'lasso_lambda':
         example = LassoExample(10, seed=1)
     elif name == 'control_x0':
@@ -209,6 +241,12 @@ def run_update(name):
 
 
 def capture_case(label, function, **metadata):
+    """
+    Run one validation callable and return its result with metadata and warnings.
+
+    Record both passing and failing cases, capturing exception tracebacks on
+    failure. Print the case status and any failure traceback.
+    """
     result = dict(case=label, **metadata)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter('always')
@@ -255,6 +293,11 @@ def run_suite(quick=False):
 
 
 def main():
+    """
+    Parse CLI options, run the validation suite, and optionally save JSON results.
+
+    Print a summary and return 0 if all cases pass, otherwise 1.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--quick', action='store_true', help='One size and seed per class, plus updates')
     parser.add_argument('--output', type=Path, help='Optional measured-result JSON file')
