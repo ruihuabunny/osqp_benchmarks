@@ -268,9 +268,13 @@ The current generators use `np.random.seed(seed)`, which changes NumPy's global 
 
 Before increasing instance sizes, assess memory usage and generation cost based on the final QP dimensions. Lasso/Huber/SVM fix the number of samples at 100 times the number of features; the number of nonzeros in matrices with fixed density grows with their dimensions, and the Gram matrices in Random/Eq QP may also introduce fill-in. Control retains dense eigendecomposition and Riccati solving, so sparse QP assembly alone does not remove these bottlenecks. Feasibility and numerical behaviour at larger sizes and with other seeds require further validation.
 
-## 3. Next phase: explore integration into `src/generators/qp`
+## 3. Next phase: controllable qp difficulty in osqp generators
 
-**The next phase will explore integrating the 7 reproduced generator families in this directory into [`src/generators/qp`](../../../src/generators/qp) in the main repository, allowing the project to obtain standard QP instances from these problem families through its own generation entry points.** The target directory is currently empty, and the integration interface has yet to be implemented.
+Here are the controllable difficulty params on the generator side: Dimensions; sparsity patterns; coefficient scaling; PSD rank/spectrum and conditioning through compatible constructions; planted feasibility or active constraints
+
+## 4. Next next phase: explore integration into `src/generators/qp`
+
+**The next next phase will explore integrating the 7 reproduced generator families in this directory into [`src/generators/qp`](../../../src/generators/qp) in the main repository, allowing the project to obtain standard QP instances from these problem families through its own generation entry points.** The target directory is currently empty, and the integration interface has yet to be implemented.
 
 The suggested sequence is:
 

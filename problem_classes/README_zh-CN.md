@@ -268,9 +268,13 @@ print("lambda 加倍后的目标值:", updated.info.obj_val)
 
 扩大实例前应结合最终 QP 规模评估内存和生成成本：Lasso/Huber/SVM 的样本数固定为特征数的 100 倍；固定密度矩阵的非零数随尺寸增长，Random/Eq QP 的 Gram 矩阵还可能产生填充。Control 保留稠密特征分解和 Riccati 求解，稀疏 QP 装配本身不能消除这些瓶颈。更大尺寸与其他 seed 的可行性和数值表现需要继续验证。
 
-## 3. 下一阶段目标：尝试接入 `src/generators/qp`
+## 3. 下一阶段目标：让改造osqp instance generator，控制其生成qp问题的难度
 
-**下一阶段将尝试把本目录已复现的 7 类 generators 接入主仓库的 [`src/generators/qp`](../../../src/generators/qp)，使项目可以通过自身的生成入口获得这些问题族的标准 QP 实例。** 当前目标目录尚为空，具体接入接口有待实现。
+Instance generator侧难度可控参数有：维度；稀疏模式；系数尺度；通过相容构造控制的 PSD 秩、谱和条件数；预先植入的可行性或活跃约束
+
+## 4. 下下阶段目标：尝试接入 `src/generators/qp`
+
+**下下一阶段将尝试把本目录已复现的 7 类 generators 接入主仓库的 [`src/generators/qp`](../../../src/generators/qp)，使项目可以通过自身的生成入口获得这些问题族的标准 QP 实例。** 当前目标目录尚为空，具体接入接口有待实现。
 
 建议按以下顺序推进：
 
