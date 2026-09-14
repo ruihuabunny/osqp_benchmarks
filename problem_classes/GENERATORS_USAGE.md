@@ -137,6 +137,290 @@ Control、Portfolio、Huber、SVM 还提供 `A_nobounds`、`l_nobounds`、`u_nob
 
 Lasso 的残差平方项没有 `1/2`。SVM 的符号和 `1/2` 系数按当前源码列出。Huber 对应阈值 1 的损失：小残差为 `0.5*r²`，大残差为 `abs(r)-0.5`。Control 的状态和输入按时间逐列展开，使用 `order='F'`；当前终端代价保留源码中 Riccati 解与其转置的乘积。
 
+### 5.1 Control：`__init__` 参数与 MPC 模型
+
+`ControlExample.__init__()` 生成控制问题的参数，`_generate_qp_problem()` 读取这些 `self` 属性，将整个预测区间的目标和约束组装成 QP。对正整数输入 `n`，当前实现使用：
+
+$$
+n_x=\texttt{self.nx}=n,\qquad
+n_u=\texttt{self.nu}=\lfloor n/2\rfloor,\qquad
+T=\texttt{self.T}=10.
+$$
+
+下面用 $A_d$ 表示 `self.A`，用 $A_{\mathrm{QP}}$ 表示 `qp_problem['A']`；用 $x_{\mathrm{init}}$ 表示已知参数 `self.x0`。向量的 shape 按 NumPy 一维数组写成 `(长度,)`。
+
+| `__init__` 属性 | shape | 在 MPC 中的作用 |
+| --- | --- | --- |
+| `self.A`，记为 $A_d$ | $(n_x,n_x)$ | 状态转移矩阵；决定当前状态如何影响下一步状态 |
+| `self.B` | $(n_x,n_u)$ | 控制输入矩阵；决定各控制输入如何影响状态 |
+| `self.Q` | $(n_x,n_x)$ | 过程中的状态代价矩阵，当前为非负对角矩阵 |
+| `self.R` | $(n_u,n_u)$ | 控制输入代价矩阵，当前为 $0.1I_{n_u}$ |
+| `self.QN`，记为 $Q_N$ | $(n_x,n_x)$ | 预测最后一步的终端状态代价矩阵 |
+| `self.x0` | $(n_x,)$ | 已知初始状态 |
+| `self.xmin`、`self.xmax` | $(n_x,)$ | 每一步状态的逐分量下界和上界 |
+| `self.umin`、`self.umax` | $(n_u,)$ | 每一步控制输入的逐分量下界和上界 |
+| `self.nx`、`self.nu`、`self.T` | 标量 | 单步状态维数、单步输入维数、预测步数 |
+
+这些属性定义如下有限时域 MPC 问题：
+
+$$
+\begin{aligned}
+\min_{x_0,\ldots,x_T,\,u_0,\ldots,u_{T-1}}\quad
+&\sum_{k=0}^{T-1}\left(x_k^\mathsf{T}Qx_k+u_k^\mathsf{T}Ru_k\right)
+ +x_T^\mathsf{T}Q_Nx_T\\
+\text{s.t.}\quad
+&x_0=x_{\mathrm{init}},\\
+&x_{k+1}=A_dx_k+Bu_k, &&k=0,\ldots,T-1,\\
+&x_{\min}\leq x_k\leq x_{\max}, &&k=0,\ldots,T,\\
+&u_{\min}\leq u_k\leq u_{\max}, &&k=0,\ldots,T-1.
+\end{aligned}
+$$
+
+$A_d$、$B$ 决定状态如何演化；$Q$、$R$、$Q_N$ 决定如何评价一条轨迹。相对其他代价增大 $R$，会更重视节省控制用量；$Q_N$ 则使优化兼顾预测终点的状态偏差。这里的状态代价以零状态为参照。
+
+源码会调整 `self.A` 的特征值，使其模小于 1，以控制离散动力学的稳定性。`self.A` 旁的 `the matrix A is for QP constraints` 注释不准确，应按上述状态转移矩阵理解。
+
+终端代价的实际生成过程为：
+
+$$
+S=\operatorname{solve\_discrete\_are}(A_d,B,Q,R),\qquad
+Q_N=SS^\mathsf{T}\succeq0.
+$$
+
+因此当前使用的终端权重是 Riccati 解与其转置的乘积；它与直接使用 Riccati 解 $S$ 的终端代价不同。
+
+### 5.2 Control：轨迹变量展开与 QP 变量数
+
+MPC 的状态轨迹和控制轨迹为：
+
+$$
+X=[x_0,\ldots,x_T]\in\mathbb R^{n_x\times(T+1)},\qquad
+U=[u_0,\ldots,u_{T-1}]\in\mathbb R^{n_u\times T}.
+$$
+
+这对应 `_generate_cvxpy_problem()` 中 shape 为 `(nx, T+1)` 的 `x` 和 shape 为 `(nu, T)` 的 `u`。QP 使用按时间逐列展开的单个向量：
+
+$$
+z=
+\begin{bmatrix}
+\operatorname{vec}_F(X)\\
+\operatorname{vec}_F(U)
+\end{bmatrix}
+=
+\begin{bmatrix}
+x_0\\\vdots\\x_T\\u_0\\\vdots\\u_{T-1}
+\end{bmatrix}.
+$$
+
+定义状态变量总数和控制变量总数：
+
+$$
+s=(T+1)n_x,\qquad c=Tn_u.
+$$
+
+于是：
+
+$$
+\boxed{n_{\mathrm{QP}}=s+c=(T+1)n_x+Tn_u},\qquad
+z\in\mathbb R^{n_{\mathrm{QP}}}.
+$$
+
+`x_0` 也占用 $n_x$ 个决策变量，通过初始状态等式固定为 `self.x0`。`qp_problem` 保存目标与约束的系数；求解器创建并求解 $z$，其 shape 为 `(n_QP,)`。
+
+### 5.3 Control：二次目标的块矩阵与 shape
+
+OSQP 的目标形式为：
+
+$$
+\min_z\;\frac12z^\mathsf{T}Pz+q^\mathsf{T}z.
+$$
+
+代码用 Kronecker 积和块对角拼接构造：
+
+$$
+P_x=I_T\otimes Q\in\mathbb R^{Tn_x\times Tn_x},\qquad
+P_u=I_T\otimes R\in\mathbb R^{c\times c},
+$$
+
+$$
+\begin{aligned}
+P
+&=2\operatorname{blkdiag}(P_x,Q_N,P_u)\\
+&=2\operatorname{blkdiag}
+\left(\underbrace{Q,\ldots,Q}_{T\text{ 个}},Q_N,
+\underbrace{R,\ldots,R}_{T\text{ 个}}\right)
+\in\mathbb R^{n_{\mathrm{QP}}\times n_{\mathrm{QP}}},\\
+q&=0\in\mathbb R^{n_{\mathrm{QP}}}.
+\end{aligned}
+$$
+
+`spa.kron(I_T, Q)` 在对角线上重复放置 $T$ 个 $Q$。乘以 2 抵消 OSQP 目标前的 $1/2$；MPC 目标没有一次项，因此 `q` 全为零。三个块的总维度为 $Tn_x+n_x+c=s+c$，与 $z$ 的排列一致。
+
+### 5.4 Control：约束组装、行数与 shape
+
+初始条件和动力学先写成：
+
+$$
+-x_0=-x_{\mathrm{init}},\qquad
+A_dx_k-x_{k+1}+Bu_k=0,\quad k=0,\ldots,T-1.
+$$
+
+设 $J\in\mathbb R^{(T+1)\times(T+1)}$ 的第一条下副对角线全为 1，其余为 0，则代码中的状态和输入系数块为：
+
+$$
+A_x=-I_s+J\otimes A_d\in\mathbb R^{s\times s},\qquad
+A_u=
+\begin{bmatrix}
+0_{1\times T}\\I_T
+\end{bmatrix}\otimes B
+\in\mathbb R^{s\times c}.
+$$
+
+横向拼接得到：
+
+$$
+D=[A_x\;A_u]\in\mathbb R^{s\times n_{\mathrm{QP}}},\qquad
+b=
+\begin{bmatrix}
+-x_{\mathrm{init}}\\0_{Tn_x}
+\end{bmatrix}\in\mathbb R^s,
+\qquad Dz=b.
+$$
+
+例如只为展示结构而取 $T=2$ 时：
+
+$$
+\begin{bmatrix}
+-I&0&0&0&0\\
+A_d&-I&0&B&0\\
+0&A_d&-I&0&B
+\end{bmatrix}
+\begin{bmatrix}
+x_0\\x_1\\x_2\\u_0\\u_1
+\end{bmatrix}
+=
+\begin{bmatrix}
+-x_{\mathrm{init}}\\0\\0
+\end{bmatrix}.
+$$
+
+初始条件贡献 $n_x$ 行，$T$ 步动力学贡献 $Tn_x$ 行，共 $s$ 行。函数先保存 `A_nobounds = D`、`l_nobounds = u_nobounds = b`。等式通过相同上下界表示：$b\leq Dz\leq b$。
+
+随后追加状态上下界和输入上下界，得到最终约束矩阵：
+
+$$
+A_{\mathrm{QP}}=
+\begin{bmatrix}
+A_x&A_u\\
+I_s&0_{s\times c}\\
+0_{c\times s}&I_c
+\end{bmatrix}
+\in\mathbb R^{(2s+c)\times(s+c)}.
+$$
+
+对应的上下界为：
+
+$$
+\ell=
+\begin{bmatrix}
+b\\
+\mathbf1_{T+1}\otimes x_{\min}\\
+\mathbf1_T\otimes u_{\min}
+\end{bmatrix},\qquad
+u_{\mathrm{QP}}=
+\begin{bmatrix}
+b\\
+\mathbf1_{T+1}\otimes x_{\max}\\
+\mathbf1_T\otimes u_{\max}
+\end{bmatrix}
+\in\mathbb R^{2s+c}.
+$$
+
+$\mathbf1_r\otimes v$ 表示将向量 $v$ 重复堆叠 $r$ 次，对应 `np.tile(v, r)`。这里 $u_{\mathrm{QP}}$ 是 `qp_problem['u']` 的约束上界向量；控制输入是 $u_k$，其轨迹存放在 $z$ 的后 $c$ 个分量中。
+
+| 约束类型 | 标量约束行数 | 在最终 `A` 中的行切片（从 0 开始） |
+| --- | --- | --- |
+| 初始状态 $x_0=x_{\mathrm{init}}$ | $n_x$ | `0:nx` |
+| $T$ 步动力学 | $Tn_x$ | `nx:s` |
+| 所有状态的上下界 | $s=(T+1)n_x$ | `s:2*s` |
+| 所有控制输入的上下界 | $c=Tn_u$ | `2*s:2*s+c` |
+
+每个标量变量的下界和上界合并为一行双侧约束，因此变量上下界一共贡献 $s+c$ 行。最终：
+
+$$
+\boxed{m_{\mathrm{QP}}=2s+c=2(T+1)n_x+Tn_u},\qquad
+\ell\leq A_{\mathrm{QP}}z\leq u_{\mathrm{QP}}.
+$$
+
+### 5.5 Control：`qp_problem` 输出 shape 汇总
+
+| 字段 | shape 或值 | 对应内容 |
+| --- | --- | --- |
+| `P` | `(n_QP, n_QP)` | 状态、终端状态及控制输入的二次代价 |
+| `q` | `(n_QP,)` | 全零一次项 |
+| `A` | `(m_QP, n_QP)` | 初始条件、动力学、状态和输入上下界 |
+| `l`、`u` | `(m_QP,)` | 全部约束的下界、上界 |
+| `n` | 标量，值为 $n_{\mathrm{QP}}=s+c$ | QP 决策变量总数 |
+| `m` | 标量，值为 $m_{\mathrm{QP}}=2s+c$ | QP 约束行数 |
+| `A_nobounds` | `(s, n_QP)` | 初始条件和动力学的系数矩阵 $D$ |
+| `l_nobounds`、`u_nobounds` | `(s,)` | 均等于等式右端向量 $b$ |
+| `lx`、`ux` | `(n_QP,)` | 按 $z$ 的顺序排列的状态和控制输入上下界 |
+| `bounds_idx` | `(n_QP,)` | 所有变量的索引 `0, ..., n_QP-1` |
+
+`lx/ux` 包括全部状态和控制输入的变量边界；它们相当于从 `l/u` 中去掉前 $s$ 个等式边界。`P` 和 `A` 的 shape 是逻辑矩阵维度，实际使用 SciPy 稀疏矩阵存储。求解得到的原始变量 $z$ 的 shape 为 `(n_QP,)`，对偶变量 $y$ 的 shape 为 `(m_QP,)`；它们不存放在 `qp_problem` 字典中。
+
+### 5.6 Control：具体尺寸与可运行示例
+
+例如构造参数为 `n=100` 时，当前实现规定 $n_x=100$、$n_u=50$、$T=10$，所以：
+
+$$
+s=11\times100=1100,\qquad c=10\times50=500,
+$$
+
+$$
+\boxed{n_{\mathrm{QP}}=1600,\qquad m_{\mathrm{QP}}=2700}.
+$$
+
+| 对象 | `n=100` 时的 shape |
+| --- | --- |
+| `self.A`、`self.Q`、`self.QN` | `(100, 100)` |
+| `self.B` | `(100, 50)` |
+| `self.R` | `(50, 50)` |
+| 状态轨迹 $X$、控制轨迹 $U$ | `(100, 11)`、`(50, 10)` |
+| QP 决策向量 $z$ | `(1600,)` |
+| `P`、`q` | `(1600, 1600)`、`(1600,)` |
+| `A` | `(2700, 1600)` |
+| `l`、`u` | `(2700,)` |
+| `A_nobounds` | `(1100, 1600)` |
+| `l_nobounds`、`u_nobounds` | `(1100,)` |
+| `lx`、`ux`、`bounds_idx` | `(1600,)` |
+
+这个表按维度公式计算，表示构造后的逻辑尺寸，不表示该规模已经通过求解或性能验证。构造函数输入的 `n=100` 是单步状态维数，输出 `qp_problem['n']=1600` 是整条预测轨迹的决策变量总数。
+
+下面复用第 4 节已生成的 `ControlExample(10, seed=1)`，打印实际 shape；此时应得到 `n_QP=160`、`m_QP=270`。代码使用独立的 `control_example`、`control_qp` 名称，便于后面的 Lasso 示例继续执行。
+
+```python
+control_example = instances["control"]
+control_qp = control_example.qp_problem
+nx, nu, horizon = control_example.nx, control_example.nu, control_example.T
+state_count = (horizon + 1) * nx
+input_count = horizon * nu
+
+print(f"nx={nx}, nu={nu}, T={horizon}")
+print("公式计算:", f"n_QP={state_count + input_count}, "
+      f"m_QP={2 * state_count + input_count}")
+print("实际输出:", f"n_QP={control_qp['n']}, m_QP={control_qp['m']}")
+for name in ("A", "B", "Q", "R", "QN", "x0", "xmin", "xmax", "umin", "umax"):
+    print(f"self.{name:5s}: {getattr(control_example, name).shape}")
+
+state_trajectory, input_trajectory = control_example.cvxpy_variables
+print("状态轨迹 X:", state_trajectory.shape)
+print("控制轨迹 U:", input_trajectory.shape)
+for key in ("P", "q", "A", "l", "u", "A_nobounds", "l_nobounds",
+            "u_nobounds", "lx", "ux", "bounds_idx"):
+    print(f"qp_problem[{key!r}]: {control_qp[key].shape}")
+```
+
 ## 6. 求解和交叉检查
 
 以下以 Lasso 为例直接调用 `.venv` 中安装的 OSQP。`polishing` 是本次安装版本使用的参数名。

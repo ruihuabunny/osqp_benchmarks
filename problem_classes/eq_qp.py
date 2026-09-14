@@ -7,29 +7,41 @@ class EqQPExample(object):
     '''
     Equality constrained QP example
     '''
-    def __init__(self, n, seed=1):
+    def __init__(self, n, seed=1, max_spectrum=None, max_cond_num=None, r=None):
         '''
         Generate problem in QP format and CVXPY format
+        n: dimension of the matrix self.P
+        seed: random seed; retains the original second positional argument
+        r: rank of self.P, from 0 to n; defaults to n
+        max_spectrum: the spectrum of self.P should not exceed max_spectrum;
+        max_cond_num: the condition number of self.P should not exceed max_cond_num;
         '''
-        # Set random seed
-        np.random.seed(seed)
-
-        m = int(n/2)
-
-        # Generate problem data
         self.n = int(n)
-        self.m = m
-        P = spa.random(n, n, density=0.15,
-                       data_rvs=np.random.randn,
-                       format='csc')
-        self.P = P.dot(P.T).tocsc() + 1e-02 * spa.eye(n)
-        self.q = np.random.randn(n)
-        self.A = spa.random(m, n, density=0.15,
-                            data_rvs=np.random.randn,
+        self.m = self.n // 2
+        self.r = self.n if r is None else r
+        if not isinstance(self.r, (int, np.integer)) or not 0 <= self.r <= self.n:
+            raise ValueError('r must be an integer between 0 and n')
+        rng = np.random.default_rng(seed)
+
+        # The identity block makes G full column rank, including sparse cases.
+        lower = spa.random(self.n - self.r, self.r, density=0.15,
+                           data_rvs=rng.standard_normal, random_state=rng,
+                           format='csc')
+        G = spa.vstack([spa.eye(self.r, format='csc'), lower], format='csc')
+        G = G[rng.permutation(self.n), :]
+        Lambda = spa.diags(rng.uniform(0.1, 1.0, self.r),
+                           shape=(self.r, self.r), format='csc')
+        self.P = (G @ Lambda @ G.T).tocsc()
+        self.A = spa.random(self.m, self.n, density=0.15,
+                            data_rvs=rng.standard_normal, random_state=rng,
                             format='csc')
-        x_sol = np.random.randn(n)  # Create fictitious solution
+
+        # Plant an optimal primal/dual pair to keep rank-deficient QPs bounded.
+        x_sol = rng.standard_normal(self.n)
+        y_sol = rng.standard_normal(self.m)
         self.l = self.A@x_sol
         self.u = np.copy(self.l)
+        self.q = -self.P @ x_sol - self.A.T @ y_sol
 
         self.qp_problem = self._generate_qp_problem()
         self.cvxpy_problem = self._generate_cvxpy_problem()
@@ -58,7 +70,9 @@ class EqQPExample(object):
         Generate QP problem
         '''
         x_var = cvxpy.Variable(self.n)
-        objective = .5 * cvxpy.quad_form(x_var, self.P) + self.q @ x_var
+        # P is PSD by construction; numerical checks can fail at zero eigenvalues.
+        objective = (.5 * cvxpy.quad_form(x_var, cvxpy.psd_wrap(self.P))
+                     + self.q @ x_var)
         constraints = [self.A @ x_var == self.u]
         problem = cvxpy.Problem(cvxpy.Minimize(objective), constraints)
 
