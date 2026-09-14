@@ -7,24 +7,51 @@ class LassoExample(object):
     '''
     Lasso QP example
     '''
-    def __init__(self, n, seed=1):
+    def __init__(self, n, seed=1, m=None, density=0.15,
+                 data_scale=1.0, lambda_ratio=0.1):
         '''
         Generate problem in QP format and CVXPY format
+        n: number of features
+        seed: random seed; retains the original second positional argument
+        m: number of data points; defaults to 100 * n
+        density: nonzero density of the data matrix Ad, in (0, 1]
+        data_scale: positive multiplier applied to both Ad and bd, including
+            observation noise; preserves the signal-to-noise ratio
+        lambda_ratio: nonnegative lambda / lambda_max, where
+            lambda_max = 2 * ||Ad.T @ bd||_inf is the zero-solution threshold
+            for ||Ad @ x - bd||_2^2 + lambda * ||x||_1
+
+        The default ratio 0.1 preserves the previous regularization strength
+        relative to the zero-solution threshold. Ratios >= 1 admit x = 0.
+        The final QP has m + 2*n variables and m + 2*n constraints.
         '''
-        # Set random seed
-        np.random.seed(seed)
-
         self.n = int(n)               # Number of features
-        self.m = int(self.n * 100)    # Number of data-points
+        m = 100 * self.n if m is None else m
+        if self.n < 1:
+            raise ValueError('n must be positive')
+        if not isinstance(m, (int, np.integer)) or m < 1:
+            raise ValueError('m must be a positive integer')
+        if not 0 < density <= 1:
+            raise ValueError('density must be in (0, 1]')
+        if not np.isfinite(data_scale) or data_scale <= 0:
+            raise ValueError('data_scale must be finite and positive')
+        if not np.isfinite(lambda_ratio) or lambda_ratio < 0:
+            raise ValueError('lambda_ratio must be finite and nonnegative')
+        self.m = int(m)
+        self.density = density
+        self.data_scale = data_scale
+        rng = np.random.default_rng(seed)
 
-        self.Ad = spa.random(self.m, self.n, density=0.15,
-                             data_rvs=np.random.randn)
-        self.x_true = np.multiply((np.random.rand(self.n) >
-                                   0.5).astype(float),
-                                  np.random.randn(self.n)) / np.sqrt(self.n)
-        self.bd = self.Ad.dot(self.x_true) + np.random.randn(self.m)
-        self.lambda_max = np.linalg.norm(self.Ad.T.dot(self.bd), np.inf)
-        self.lambda_param = (1./5.) * self.lambda_max
+        self.Ad = spa.random(self.m, self.n, density=self.density,
+                             data_rvs=rng.standard_normal, random_state=rng,
+                             format='csc')
+        self.x_true = ((rng.random(self.n) > 0.5)
+                       * rng.standard_normal(self.n)) / np.sqrt(self.n)
+        self.bd = self.Ad @ self.x_true + rng.standard_normal(self.m)
+        self.Ad *= self.data_scale
+        self.bd *= self.data_scale
+        self.lambda_max = 2 * np.linalg.norm(self.Ad.T @ self.bd, np.inf)
+        self.lambda_param = lambda_ratio * self.lambda_max
 
         self.qp_problem = self._generate_qp_problem()
         self.cvxpy_problem, self.cvxpy_variables, self.cvxpy_param = \

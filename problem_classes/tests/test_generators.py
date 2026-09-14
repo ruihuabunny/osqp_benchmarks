@@ -18,7 +18,7 @@ import osqp
 import scipy.sparse as sp
 
 # Support both direct execution and import from the accompanying notebooks.
-BENCHMARK_ROOT = Path(__file__).resolve().parent.parent
+BENCHMARK_ROOT = Path(__file__).resolve().parents[2]
 if str(BENCHMARK_ROOT) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_ROOT))
 
@@ -276,8 +276,9 @@ def run_suite(quick=False):
                                             size=size, seed=seed))
     for name in ('lasso_lambda', 'control_x0', 'portfolio_mu', 'portfolio_F_D'):
         records.append(capture_case(name, lambda: run_update(name), kind='parameter_update'))
-    source_files = [Path(__file__)] + [Path(__file__).with_name(cls.__module__.split('.')[-1] + '.py')
-                                     for cls, _ in CASES]
+    source_files = [Path(__file__)] + [
+        BENCHMARK_ROOT / 'problem_classes' / (cls.__module__.split('.')[-1] + '.py')
+        for cls, _ in CASES]
     return dict(timestamp_utc=datetime.now(timezone.utc).isoformat(),
                 python=sys.version, executable=sys.executable, prefix=sys.prefix,
                 platform=platform.platform(),

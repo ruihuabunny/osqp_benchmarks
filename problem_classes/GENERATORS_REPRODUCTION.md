@@ -43,7 +43,7 @@
 python3 -m venv .venv
 .venv/bin/python -m pip install --no-cache-dir -r third_parties/osqp_benchmarks/problem_classes/requirements-generators.lock
 .venv/bin/python -m pip --no-cache-dir check
-.venv/bin/python third_parties/osqp_benchmarks/problem_classes/validate_generators.py --output /tmp/osqp-generators-rerun.json
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generators.py --output /tmp/osqp-generators-rerun.json
 ```
 
 该版本快照针对本次 Python/Linux 环境；时间、浮点末位和跨平台安装可用性不作逐位保证。此后运行生成器无需联网或下载数据。
@@ -79,7 +79,7 @@ Random QP、Eq QP、Portfolio、Lasso、SVM、Control 的 CVXPY 表达式使用 
 
 ## 4. 验证设计与判定标准
 
-[validate_generators.py](validate_generators.py) 显式导入 7 个随机生成器，不扫描数据目录。默认配置如下：
+[tests/test_generators.py](tests/test_generators.py) 显式导入 7 个随机生成器，不扫描数据目录。默认配置如下：
 
 | 类别 | 首个构造参数 | seeds | 基础检查数 |
 | --- | --- | --- | --- |
@@ -183,7 +183,7 @@ print("源码指纹与保存记录一致")
 重新求解并对照全部标准 QP 的指纹和目标值，不要求耗时或元数据时间戳一致。输出仅在内存中，保留随本报告保存的原始 JSON。
 
 ```python
-from problem_classes.validate_generators import run_suite
+from problem_classes.tests.test_generators import run_suite
 
 rerun = run_suite()
 assert rerun["all_passed"] and rerun["total"] == 46
@@ -203,7 +203,7 @@ print("全部 QP 指纹及目标值与保存记录一致")
 import subprocess
 import types
 import warnings
-from problem_classes.validate_generators import CASES, qp_fingerprint
+from problem_classes.tests.test_generators import CASES, qp_fingerprint
 
 BASELINE_COMMIT = "e34a4a6709d4676483cacadedd040394ed0b8051"
 compatible = 0
@@ -239,7 +239,7 @@ print(f"修复前后初始 QP 数据一致: {compatible}/42")
 | --- | --- |
 | [GENERATORS_USAGE.md](GENERATORS_USAGE.md) / [GENERATORS_USAGE.ipynb](GENERATORS_USAGE.ipynb) | 安装、生成、求解、保存/加载、参数更新与 Notebook 使用 |
 | [GENERATORS_REPRODUCTION.md](GENERATORS_REPRODUCTION.md) / [GENERATORS_REPRODUCTION.ipynb](GENERATORS_REPRODUCTION.ipynb) | 本次复现过程、修复证据、实测结果及可重跑检查 |
-| [validate_generators.py](validate_generators.py) | 独立复现入口；失败返回非零退出码 |
+| [tests/test_generators.py](tests/test_generators.py) | 独立复现入口；失败返回非零退出码 |
 | [requirements-generators.lock](requirements-generators.lock) | 本次 `.venv` 的完整依赖快照 |
 | [generator_validation_baseline.json](generator_validation_baseline.json) | 修改前 7 类代表实例及 Lasso 更新错误的原始测量 |
 | [generator_validation_results.json](generator_validation_results.json) | 修改后 46 项测量、环境、设置及源码/实例指纹 |

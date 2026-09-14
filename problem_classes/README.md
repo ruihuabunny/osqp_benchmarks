@@ -48,7 +48,7 @@ These changes preserved the generator constructor interfaces, original problem s
 
 ### 1.3 Validation method and results
 
-The standalone entry point is [validate_generators.py](validate_generators.py). Each base configuration undergoes the following checks:
+The standalone entry point is [tests/test_generators.py](tests/test_generators.py). Each base configuration undergoes the following checks:
 
 1. Construct the instance and check the dimensions of `P,q,A,l,u,n,m`, sparse matrices, valid numerical values and bounds, Hessian symmetry, and CVXPY DCP compliance; where split bound fields are present, check the reconstructed constraints.
 2. Call OSQP directly on the standard QP, then call OSQP through CVXPY; recover the CVXPY primal/dual solutions and substitute them into the original QP to check constraints, stationarity, complementarity residuals, and objective values.
@@ -100,10 +100,13 @@ The generators depend on NumPy, SciPy, and CVXPY; direct solving uses OSQP. The 
 
 ```bash
 # Full validation: 42 instances + 4 types of parameter updates; prints 46/46 passed on success
-.venv/bin/python third_parties/osqp_benchmarks/problem_classes/validate_generators.py --output /tmp/osqp-generators-rerun.json
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generators.py --output /tmp/osqp-generators-rerun.json
 
 # Quick validation: the first size for each family with seed=1, plus parameter updates; 11 checks in total
-.venv/bin/python third_parties/osqp_benchmarks/problem_classes/validate_generators.py --quick
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generators.py --quick
+
+# Parameter checks for Eq QP and Lasso, including sparse generation at larger sizes
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generator_parameters.py -v
 ```
 
 The script returns a nonzero exit code if validation fails. `--output` is optional; the path above writes the rerun results to `/tmp`, preserving the original reproduction records in this directory.
@@ -115,14 +118,33 @@ Instances are **generated when the class constructor is called**, which also cre
 | File and constructor | Parameter meanings | Final QP size `(n_QP, m_QP)` |
 | --- | --- | --- |
 | [random_qp.py](random_qp.py): `RandomQPExample(n, seed=1)` | `n` is the original number of variables | `(n, 10*n)` |
-| [eq_qp.py](eq_qp.py): `EqQPExample(n, seed=1)` | `n` is the original number of variables | `(n, floor(n/2))` |
+| [eq_qp.py](eq_qp.py): `EqQPExample(n, m=None, lower_density=0.15, seed=1, ...)` | `n` is the number of variables; `m` defaults to `floor(n/2)` | `(n, m)` |
 | [portfolio.py](portfolio.py): `PortfolioExample(k, seed=1, n=None)` | `k` is the number of factors; the number of assets `n` defaults to `100*k` | `(n+k, n+k+1)` |
-| [lasso.py](lasso.py): `LassoExample(n, seed=1)` | `n` is the number of features; the number of samples is `100*n` | `(102*n, 102*n)` |
+| [lasso.py](lasso.py): `LassoExample(n, seed=1, m=None, ...)` | `n` is the number of features; the sample count `m` defaults to `100*n` | `(m+2*n, m+2*n)` |
 | [huber.py](huber.py): `HuberExample(n, seed=1)` | `n` is the number of features; the number of samples is `100*n` | `(301*n, 300*n)` |
 | [svm.py](svm.py): `SVMExample(n, seed=1)` | `n` is the number of features; the number of samples is `100*n` | `(101*n, 200*n)` |
 | [control.py](control.py): `ControlExample(n, seed=1)` | `nx=n`, `nu=floor(n/2)`, prediction horizon `T=10` | `((T+1)*nx+T*nu, 2*(T+1)*nx+T*nu)` |
 
 Use explicit positive integer sizes, starting at `n>=2` for Eq QP and Control. To specify a custom number of assets for Portfolio, use `PortfolioExample(3, seed=1, n=60)`; its second positional argument is the seed. Control currently does not support specifying `nx/nu/T` independently through constructor parameters.
+
+Eq QP accepts `1 <= m <= n` and `0 < lower_density <= 1`. The density applies to the lower block used to construct `P` and to the constraint matrix `A`; it is not a target density for `P`. The optional `r`, `max_spectrum`, and `max_cond_num` control the rank of `P`, an eigenvalue upper bound, and an upper bound on the ratio of its largest to smallest positive eigenvalue. The bounds need not be attained. Pass `seed` by keyword: the second positional argument of Eq QP is now `m`.
+
+Lasso accepts independent positive `m` and `n`, including `m < n`. Its additional parameters are `density=0.15`, `data_scale=1.0`, and `lambda_ratio=0.1`; its second positional argument remains `seed`.
+
+- `density` is in `(0, 1]` and controls `Ad`, not the assembled QP matrix. For large instances, choose it to keep `m*n*density` manageable.
+- `data_scale` is finite and positive. It multiplies both `Ad` and `bd`, including observation noise, preserving the signal-to-noise ratio. At a fixed `lambda_ratio`, multiplying this scale by `s` multiplies lambda and the original objective by `s**2`, preserving the minimizers.
+- `lambda_ratio` is finite and nonnegative, with `lambda = lambda_ratio * lambda_max`. For the objective `||Ad @ x - bd||_2**2 + lambda * ||x||_1`, the zero-solution threshold is `lambda_max = 2 * ||Ad.T @ bd||_inf`. Ratios at least 1 admit `x=0`; ratio 0 gives unregularized least squares. The default ratio 0.1 retains the previous relative strength. `update_lambda()` continues to accept an absolute lambda.
+
+Both generators use a local RNG. Fixed parameters and seed reproduce an instance without changing NumPy's global RNG state. Lasso's switch from the legacy global RNG changes the numerical instances relative to the archived reproduction results.
+
+After importing the classes as shown below, custom configurations can be generated with:
+
+```python
+eq = EqQPExample(n=100, m=40, lower_density=0.05, seed=1,
+                 r=60, max_spectrum=10.0, max_cond_num=100.0)
+lasso = LassoExample(n=1000, m=2000, density=0.005, seed=1,
+                     data_scale=2.0, lambda_ratio=0.05)
+```
 
 ### 2.3 Generate instances and access the standard QP
 

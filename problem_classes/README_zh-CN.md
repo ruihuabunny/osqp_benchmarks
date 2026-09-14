@@ -48,7 +48,7 @@
 
 ### 1.3 验证方法与结果
 
-独立入口为 [validate_generators.py](validate_generators.py)。每个基础配置执行以下检查：
+独立入口为 [tests/test_generators.py](tests/test_generators.py)。每个基础配置执行以下检查：
 
 1. 构造实例并检查 `P,q,A,l,u,n,m` 的尺寸、稀疏矩阵、合法数值与上下界、Hessian 对称性及 CVXPY DCP 条件；有拆分边界字段时检查重组结果。
 2. 使用标准 QP 直接调用 OSQP，再通过 CVXPY 调用 OSQP；恢复 CVXPY 原始/对偶解，并代回原 QP 检查约束、驻点、互补残差与目标值。
@@ -100,10 +100,13 @@ python3 -m venv .venv
 
 ```bash
 # 完整验证：42 组实例 + 4 类参数更新，成功时输出 46/46 passed
-.venv/bin/python third_parties/osqp_benchmarks/problem_classes/validate_generators.py --output /tmp/osqp-generators-rerun.json
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generators.py --output /tmp/osqp-generators-rerun.json
 
 # 快速验证：每类首个尺寸、seed=1，加上参数更新，共 11 项
-.venv/bin/python third_parties/osqp_benchmarks/problem_classes/validate_generators.py --quick
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generators.py --quick
+
+# Eq QP 和 Lasso 参数检查，包含较大尺寸的稀疏生成
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generator_parameters.py -v
 ```
 
 验证失败时脚本返回非零退出码。`--output` 可省略；上面的路径将重跑结果写入 `/tmp`，保留目录中原有的复现记录。
@@ -115,14 +118,33 @@ python3 -m venv .venv
 | 文件与构造方式 | 参数含义 | 最终 QP 规模 `(n_QP, m_QP)` |
 | --- | --- | --- |
 | [random_qp.py](random_qp.py)：`RandomQPExample(n, seed=1)` | `n` 为原始变量数 | `(n, 10*n)` |
-| [eq_qp.py](eq_qp.py)：`EqQPExample(n, seed=1)` | `n` 为原始变量数 | `(n, floor(n/2))` |
+| [eq_qp.py](eq_qp.py)：`EqQPExample(n, m=None, lower_density=0.15, seed=1, ...)` | `n` 为变量数；约束数 `m` 默认 `floor(n/2)` | `(n, m)` |
 | [portfolio.py](portfolio.py)：`PortfolioExample(k, seed=1, n=None)` | `k` 为因子数；资产数 `n` 默认 `100*k` | `(n+k, n+k+1)` |
-| [lasso.py](lasso.py)：`LassoExample(n, seed=1)` | `n` 为特征数，样本数为 `100*n` | `(102*n, 102*n)` |
+| [lasso.py](lasso.py)：`LassoExample(n, seed=1, m=None, ...)` | `n` 为特征数；样本数 `m` 默认 `100*n` | `(m+2*n, m+2*n)` |
 | [huber.py](huber.py)：`HuberExample(n, seed=1)` | `n` 为特征数，样本数为 `100*n` | `(301*n, 300*n)` |
 | [svm.py](svm.py)：`SVMExample(n, seed=1)` | `n` 为特征数，样本数为 `100*n` | `(101*n, 200*n)` |
 | [control.py](control.py)：`ControlExample(n, seed=1)` | `nx=n`，`nu=floor(n/2)`，预测时域 `T=10` | `((T+1)*nx+T*nu, 2*(T+1)*nx+T*nu)` |
 
 使用明确的正整数尺寸，Eq QP 和 Control 从 `n>=2` 开始。Portfolio 自定义资产数时使用 `PortfolioExample(3, seed=1, n=60)`，其第二个位置参数是 seed。Control 当前不支持通过构造参数独立指定 `nx/nu/T`。
+
+Eq QP 支持 `1 <= m <= n`、`0 < lower_density <= 1`。density 同时作用于构造 `P` 的下部矩阵和约束矩阵 `A`，不是最终 `P` 的目标密度。可选的 `r`、`max_spectrum`、`max_cond_num` 分别控制 `P` 的秩、最大特征值上界，以及最大与最小正特征值之比的上界；上界不保证取到。Eq QP 的第二个位置参数现在是 `m`，请通过关键字传入 `seed`。
+
+Lasso 的正整数 `m`、`n` 可独立设置，也支持 `m < n`。新增参数为 `density=0.15`、`data_scale=1.0`、`lambda_ratio=0.1`；其第二个位置参数仍是 `seed`。
+
+- `density` 取值为 `(0, 1]`，控制数据矩阵 `Ad`，不是最终 QP 矩阵的密度。大规模生成时应根据 `m*n*density` 控制非零数。
+- `data_scale` 为有限正数，同时缩放 `Ad` 和 `bd`（包括观测噪声），保持信噪比。固定 `lambda_ratio` 时，尺度乘以 `s` 会使 lambda 和原始目标函数同时乘以 `s**2`，最优解集合保持一致。
+- `lambda_ratio` 为有限非负数，使用 `lambda = lambda_ratio * lambda_max`。当前目标 `||Ad @ x - bd||_2**2 + lambda * ||x||_1` 的零解阈值为 `lambda_max = 2 * ||Ad.T @ bd||_inf`。比例至少为 1 时 `x=0` 是最优解，比例为 0 时对应无正则化最小二乘。默认比例 0.1 保持原来的相对正则化强度。`update_lambda()` 仍接受绝对 lambda 值。
+
+两个生成器均使用局部 RNG，同参数同 seed 可复现，且不改变 NumPy 的全局随机状态。Lasso 从旧全局 RNG 切换后，具体数值实例会与归档复现结果不同。
+
+按下节方式导入类后，可使用以下自定义配置：
+
+```python
+eq = EqQPExample(n=100, m=40, lower_density=0.05, seed=1,
+                 r=60, max_spectrum=10.0, max_cond_num=100.0)
+lasso = LassoExample(n=1000, m=2000, density=0.005, seed=1,
+                     data_scale=2.0, lambda_ratio=0.05)
+```
 
 ### 2.3 生成实例并读取标准 QP
 

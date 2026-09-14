@@ -11,14 +11,16 @@
 | 文件 | 调用方式 | 首个参数含义 | 本次验证尺寸 |
 | --- | --- | --- | --- |
 | [random_qp.py](random_qp.py) | `RandomQPExample(n, seed=1)` | QP 变量数；约束数为 `10*n` | 10、30 |
-| [eq_qp.py](eq_qp.py) | `EqQPExample(n, seed=1)` | QP 变量数；等式数为 `floor(n/2)` | 10、30 |
+| [eq_qp.py](eq_qp.py) | `EqQPExample(n, m=None, lower_density=0.15, seed=1, ...)` | QP 变量数；等式数 `m` 默认 `floor(n/2)` | 10、30 |
 | [portfolio.py](portfolio.py) | `PortfolioExample(k, seed=1, n=None)` | 因子数 `k`；资产数 `n` 默认 `100*k` | k=3、5；另测 n=60 |
-| [lasso.py](lasso.py) | `LassoExample(n, seed=1)` | 特征数；样本数 `100*n` | 5、10 |
+| [lasso.py](lasso.py) | `LassoExample(n, seed=1, m=None, ...)` | 特征数；样本数 `m` 默认 `100*n` | 5、10 |
 | [huber.py](huber.py) | `HuberExample(n, seed=1)` | 特征数；样本数 `100*n` | 5、10 |
 | [svm.py](svm.py) | `SVMExample(n, seed=1)` | 特征数；样本数 `100*n` | 5、10 |
 | [control.py](control.py) | `ControlExample(n, seed=1)` | 状态数 `nx=n`；输入数 `nu=floor(n/2)` | 4、10 |
 
 `seed` 默认均为 1。传入明确的正整数尺寸；Control 和 Eq QP 示例建议从 `n>=2` 开始。Portfolio 若指定资产数，应使用关键字 `n=...`，第二个位置参数是 `seed`。
+
+Eq QP 的第二个位置参数现在是 `m`，请通过关键字指定 `seed`；Lasso 的第二个位置参数仍是 `seed`。Eq QP 的秩和谱参数，以及 Lasso 的 `m`、`density`、`data_scale`、`lambda_ratio` 参数定义和示例见 [README 的构造参数说明](README_zh-CN.md#22-构造参数与实例规模)。
 
 以下三个文件夹不属于本次操作范围，未遍历、读取、下载或修改其内容：
 
@@ -43,13 +45,13 @@ python3 -m venv .venv
 运行全部 42 组实例和 4 类参数更新检查：
 
 ```bash
-.venv/bin/python third_parties/osqp_benchmarks/problem_classes/validate_generators.py --output /tmp/osqp-generators-rerun.json
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generators.py --output /tmp/osqp-generators-rerun.json
 ```
 
 成功时末行显示 `46/46 passed in ...s`，退出码为 0。`--quick` 只检查每类的首个尺寸、seed=1，加上 4 类参数更新，共 11 项：
 
 ```bash
-.venv/bin/python third_parties/osqp_benchmarks/problem_classes/validate_generators.py --quick
+.venv/bin/python third_parties/osqp_benchmarks/problem_classes/tests/test_generators.py --quick
 ```
 
 ## 3. 准备 Python / Notebook 路径
@@ -128,9 +130,9 @@ Control、Portfolio、Huber、SVM 还提供 `A_nobounds`、`l_nobounds`、`u_nob
 | 类别 | QP 变量排列 | n_QP | m_QP | 实际目标与约束要点 |
 | --- | --- | --- | --- | --- |
 | Random QP | `x` | N | 10N | `P=G G.T+0.01 I`；构造可行见证后生成 `A x<=u` |
-| Eq QP | `x` | N | floor(N/2) | 同类正定 Hessian；`A x=b` |
+| Eq QP | `x` | N | m（默认 floor(N/2)） | 可控秩的半正定 Hessian；`A x=b` |
 | Portfolio | `[x,y]` | N+k | N+k+1 | `x.T D x+y.T y-mu.T x/gamma`；`sum(x)=1, F.T x=y, 0<=x<=1` |
-| Lasso | `[x,y,t]` | M+2N=102N | M+2N=102N | `||y||²+lambda*sum(t)`；`y=Ad x-bd, -t<=x<=t` |
+| Lasso | `[x,y,t]` | M+2N（默认 102N） | M+2N（默认 102N） | `||y||²+lambda*sum(t)`；`y=Ad x-bd, -t<=x<=t` |
 | Huber | `[x,z,r,s]` | N+3M=301N | 3M=300N | `0.5||z||²+sum(r+s)`；`Ad x-bd-z=r-s, r,s>=0` |
 | SVM | `[x,t]` | N+M=101N | 2M=200N | `0.5||x||²+0.5*gamma*sum(t)`；`t>=diag(b_svm) A_svm x+1, t>=0` |
 | Control | `[vec_F(x),vec_F(u)]` | (T+1)nx+Tnu | 2(T+1)nx+Tnu | 状态/输入/终端二次代价、动力学、初始状态及上下界；T=10 |
@@ -446,7 +448,7 @@ np.testing.assert_allclose(result.info.obj_val, example.cvxpy_problem.value,
 print("CVXPY:", example.cvxpy_problem.status, "objective:", example.cvxpy_problem.value)
 ```
 
-该例的目标值约为 `1025.9754409815434`。`revert_cvxpy_solution()` 将 CVXPY 的原始和对偶解映射回手工 QP 的变量/约束顺序；先成功求解再调用。两条路径都使用 OSQP，主要验证模型转换及解映射，不构成不同求解器之间的独立比较。完整的残差检查在 [validate_generators.py](validate_generators.py) 中。
+该例的目标值约为 `1025.9754409815434`。`revert_cvxpy_solution()` 将 CVXPY 的原始和对偶解映射回手工 QP 的变量/约束顺序；先成功求解再调用。两条路径都使用 OSQP，主要验证模型转换及解映射，不构成不同求解器之间的独立比较。完整的残差检查在 [tests/test_generators.py](tests/test_generators.py) 中。
 
 ## 7. 保存与重新加载稀疏 QP
 
@@ -465,7 +467,7 @@ with np.load(output_dir / "vectors.npz", allow_pickle=False) as arrays:
     loaded.update(n=int(arrays["n"].item()), m=int(arrays["m"].item()))
 loaded.update(P=sp.load_npz(output_dir / "P.npz"), A=sp.load_npz(output_dir / "A.npz"))
 
-from problem_classes.validate_generators import qp_fingerprint
+from problem_classes.tests.test_generators import qp_fingerprint
 standard_fields = {key: qp[key] for key in ("P", "q", "A", "l", "u", "n", "m")}
 assert qp_fingerprint(loaded) == qp_fingerprint(standard_fields)
 print("保存/加载一致:", output_dir)
@@ -529,7 +531,7 @@ IPYTHONDIR=.venv/ipython JUPYTER_CONFIG_DIR=.venv/jupyter/config JUPYTER_RUNTIME
 最后可以在当前内核运行快速验证：
 
 ```python
-from problem_classes.validate_generators import run_suite
+from problem_classes.tests.test_generators import run_suite
 quick_result = run_suite(quick=True)
 assert quick_result["all_passed"]
 assert quick_result["total"] == 11
