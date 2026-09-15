@@ -185,6 +185,11 @@ def run_case(cls, size, seed):
     parameters = {}
     if cls is ControlExample:
         parameters = dict(nu=size // 2)
+    elif cls is PortfolioExample:
+        parameters = dict(F_density=[0.5], F_scale=1.0,
+                          F_block_sizes=[(100 * size, size)],
+                          D_spectrum=np.linspace(0.1, 1.0, 100 * size),
+                          mu_scale=1.0, gamma=1.0)
     elif cls is HuberExample:
         parameters = dict(m=100 * size, num_blocks=1,
                           block_sizes=[(100 * size, size, size)], r=size,
@@ -220,7 +225,10 @@ def run_update(name):
     elif name == 'control_x0':
         example = ControlExample(nx=10, nu=5, seed=1)
     else:
-        example = PortfolioExample(3, seed=1, n=60)
+        example = PortfolioExample(
+            3, F_density=[0.5], F_scale=1.0, F_block_sizes=[(60, 3)],
+            D_spectrum=np.linspace(0.1, 1.0, 60), mu_scale=1.0,
+            gamma=1.0, seed=1, n=60)
     before = solve_and_check(example)
     if name == 'lasso_lambda':
         example.update_lambda(2 * example.lambda_param)
