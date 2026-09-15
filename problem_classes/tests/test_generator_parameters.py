@@ -1,4 +1,4 @@
-"""Numerical checks for the parameterized Eq QP and Lasso generators."""
+"""Numerical checks for the parameterized Control, Eq QP and Lasso generators."""
 
 import unittest
 
@@ -7,8 +7,50 @@ import numpy as np
 import scipy.sparse as sp
 
 from test_generators import SETTINGS, solve_and_check
+from problem_classes.control import ControlExample
 from problem_classes.eq_qp import EqQPExample
 from problem_classes.lasso import LassoExample
+
+
+class ControlParameterTests(unittest.TestCase):
+    def test_independent_state_and_input_dimensions(self):
+        for nx, nu in ((1, 2), (4, 2), (10, 5), (10, 8), (4, 4), (4, 6)):
+            for seed in (0, 1, 2):
+                with self.subTest(nx=nx, nu=nu, seed=seed):
+                    example = ControlExample(nx=nx, nu=nu, seed=seed)
+                    self.assertEqual(example.A.shape, (nx, nx))
+                    self.assertEqual(example.B.shape, (nx, nu))
+                    self.assertEqual(example.R.shape, (nu, nu))
+                    states, inputs = example.cvxpy_variables
+                    self.assertEqual(states.shape, (nx, 11))
+                    self.assertEqual(inputs.shape, (nu, 10))
+                    self.assertEqual((example.qp_problem['n'], example.qp_problem['m']),
+                                     (11 * nx + 10 * nu, 22 * nx + 10 * nu))
+                    self.assertLess(np.max(np.abs(np.linalg.eigvals(example.A.toarray()))), 1)
+                    solve_and_check(example)
+
+    def test_reproducibility(self):
+        first = ControlExample(4, 6, seed=7)
+        same = ControlExample(nx=4, nu=6, seed=7)
+        different = ControlExample(nx=4, nu=6, seed=8)
+        for key, value in first.qp_problem.items():
+            if sp.issparse(value):
+                self.assertEqual((value - same.qp_problem[key]).nnz, 0)
+            else:
+                np.testing.assert_array_equal(value, same.qp_problem[key])
+        self.assertGreater((first.B - different.B).nnz, 0)
+
+    def test_update_x0_with_independent_dimensions(self):
+        example = ControlExample(nx=4, nu=6, seed=1)
+        solve_and_check(example)
+        new_x0 = 0.5 * example.x0
+        example.update_x0(new_x0)
+        np.testing.assert_array_equal(example.cvxpy_param.value, new_x0)
+        rebuilt = example._generate_qp_problem()
+        for key in ('l', 'u', 'l_nobounds', 'u_nobounds'):
+            np.testing.assert_array_equal(example.qp_problem[key], rebuilt[key])
+            np.testing.assert_array_equal(example.qp_problem[key][:example.nx], -new_x0)
+        solve_and_check(example)
 
 
 class GeneratorParameterTests(unittest.TestCase):

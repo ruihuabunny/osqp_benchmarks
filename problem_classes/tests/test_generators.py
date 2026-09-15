@@ -182,12 +182,21 @@ def run_case(cls, size, seed):
     Check same-seed equality and changed-seed differences, then solve the
     instance. For Control, also check dynamics stability and x0 bounds.
     """
+    parameters = {}
+    if cls is ControlExample:
+        parameters = dict(nu=size // 2)
+    elif cls is HuberExample:
+        parameters = dict(m=100 * size, num_blocks=1,
+                          block_sizes=[(100 * size, size, size)], r=size,
+                          max_singular_val=10.0, max_cond_num=100.0,
+                          delta=1.0, sigma=1.0, outlier_fraction=0.05,
+                          outlier_scale=10.0)
     started = perf_counter()
-    example = cls(size, seed=seed)
+    example = cls(size, seed=seed, **parameters)
     generate_seconds = perf_counter() - started
     fingerprint = qp_fingerprint(example.qp_problem)
-    assert fingerprint == qp_fingerprint(cls(size, seed=seed).qp_problem), 'Seed not reproducible'
-    assert fingerprint != qp_fingerprint(cls(size, seed=seed + 100).qp_problem), 'Seed not effective'
+    assert fingerprint == qp_fingerprint(cls(size, seed=seed, **parameters).qp_problem), 'Seed not reproducible'
+    assert fingerprint != qp_fingerprint(cls(size, seed=seed + 100, **parameters).qp_problem), 'Seed not effective'
     result = solve_and_check(example)
     if isinstance(example, ControlExample):
         # Only small validation sizes: do not use a dense eigensolve for huge MPCs.
@@ -209,7 +218,7 @@ def run_update(name):
     if name == 'lasso_lambda':
         example = LassoExample(10, seed=1)
     elif name == 'control_x0':
-        example = ControlExample(10, seed=1)
+        example = ControlExample(nx=10, nu=5, seed=1)
     else:
         example = PortfolioExample(3, seed=1, n=60)
     before = solve_and_check(example)

@@ -148,8 +148,12 @@ class Example(object):
         '''
 
         # Create example instance
-        example_instance = EXAMPLES_MAP[self.name](dimension,
-                                                   instance_number)
+        if EXAMPLES_MAP[self.name] is ControlExample:
+            example_instance = ControlExample(nx=dimension, nu=dimension // 2,
+                                              seed=instance_number)
+        else:
+            example_instance = EXAMPLES_MAP[self.name](dimension,
+                                                       instance_number)
 
         print(" - Solving %s with n = %i, instance = %i with solver %s" %
               (self.name, dimension, instance_number, solver))

@@ -36,7 +36,7 @@ class MPCParametric(object):
         print("Solve MPC problem for dimension %i" % self.dimension)
 
         # Create example instance
-        instance = ControlExample(self.dimension)
+        instance = ControlExample(nx=self.dimension, nu=self.dimension // 2)
         qp = instance.qp_problem
         x0 = np.copy(instance.x0)
 

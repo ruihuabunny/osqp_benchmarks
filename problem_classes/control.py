@@ -8,18 +8,22 @@ class ControlExample(object):
     '''
     Control QP example: MPC problem
     '''
-    def __init__(self, n, seed=1):
+    def __init__(self, nx, nu, seed=1):
         '''
-        Generate problem in QP format and CVXPY format
+        Generate an MPC problem in QP and CVXPY formats.
+
+        nx: number of states (positive integer)
+        nu: number of control inputs (positive integer), independent of nx
+        seed: random seed; the prediction horizon is fixed at 10
         '''
         # Set random seed
         np.random.seed(seed)
 
         # Generate random dynamics
-        self.nx = int(n)       # States
-        self.nu = int(n / 2)   # Inputs
+        self.nx = int(nx)       # States
+        self.nu = int(nu)       # Inputs
 
-        # the matrix A is for QP constraints
+        # State-transition matrix for the MPC dynamics
         self.A = spa.eye(self.nx) + .1 * spa.random(self.nx, self.nx,
                                                     density=1.0,
                                                     data_rvs=np.random.randn)
