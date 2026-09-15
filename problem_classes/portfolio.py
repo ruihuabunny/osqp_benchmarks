@@ -8,8 +8,8 @@ class PortfolioExample(object):
     Portfolio QP example
     '''
     def __init__(self, k, F_density, F_scale,
-                 F_block_sizes, D_spectrum,
-                 mu_scale, gamma, seed=1, n=None):
+                 F_block_sizes, r,
+                 mu_scale, gamma, seed=1, n=None, D_df=3.0):
         '''
         Generate a factor-model portfolio problem in QP and CVXPY format.
 
@@ -19,12 +19,14 @@ class PortfolioExample(object):
         F_scale: multiplier of standard-normal values at sampled F positions
         F_block_sizes: list of rectangular (rows, columns) block sizes;
             row counts must sum to n and column counts to k
-        D_spectrum: length-n array of finite nonnegative diagonal entries of D,
-            used in the supplied order without scaling; zeros control its rank
+        r: integer rank of D, from 0 to n; r diagonal entries are sampled as
+            abs(Student-t(D_df)), with the other n-r entries zero, then shuffled
         mu_scale: multiplier of the standard-normal expected-return vector mu
         gamma: finite positive risk-aversion coefficient
-        seed: NumPy random seed shared by all blocks and mu
+        seed: NumPy random seed shared by all F blocks, D and mu
         n: number of assets; defaults to 100*k
+        D_df: finite positive degrees of freedom of the standard Student-t
+            distribution used for D; defaults to 3.0
 
         The auxiliary variable y = F.T @ x gives n+k QP variables and n+k+1
         constraint rows. F is assembled directly as a sparse CSC matrix.
@@ -33,7 +35,7 @@ class PortfolioExample(object):
         actual block densities; shape_*, nnz_*, density_* and sparsity_* describe
         F, D, P and A after removing explicit zeros. Density is nnz/(rows*columns)
         and sparsity is 1-density. D_rank counts strictly positive entries of
-        D_spectrum and P_rank is D_rank+k. P_condition_number is infinite for
+        D and equals r; P_rank is D_rank+k. P_condition_number is infinite for
         singular P; P_positive_condition_number is the largest/smallest strictly
         positive diagonal entry of P. Both are computed directly from P.
         '''
@@ -47,7 +49,6 @@ class PortfolioExample(object):
             self.n = int(n)
 
         F_density = np.asarray(F_density)
-        D_spectrum = np.asarray(D_spectrum)
         if F_density.shape != (len(F_block_sizes),):
             raise ValueError('F_density must contain one value per F block')
         if not np.all((0 <= F_density) & (F_density <= 1)):
@@ -55,12 +56,14 @@ class PortfolioExample(object):
         if (sum(rows for rows, _ in F_block_sizes) != self.n or
                 sum(columns for _, columns in F_block_sizes) != self.k):
             raise ValueError('F block row and column counts must sum to n and k')
-        if D_spectrum.shape != (self.n,):
-            raise ValueError('D_spectrum must be a length-n array')
-        if not np.all(np.isfinite(D_spectrum) & (D_spectrum >= 0)):
-            raise ValueError('D_spectrum entries must be finite and nonnegative')
+        if not isinstance(r, (int, np.integer)) or not 0 <= r <= self.n:
+            raise ValueError('r must be an integer between 0 and n')
+        if not np.isfinite(D_df) or D_df <= 0:
+            raise ValueError('D_df must be finite and positive')
         if not np.isfinite(gamma) or gamma <= 0:
             raise ValueError('gamma must be finite and positive')
+        self.r = int(r)
+        self.D_df = D_df
 
         # Generate sparse blocks using the same random stream throughout.
         blocks = []
@@ -74,6 +77,11 @@ class PortfolioExample(object):
             block_densities.append(block.nnz / (rows * columns))
         self.F = spa.block_diag(blocks, format='csc')
         del blocks
+
+        # Sample only the r positive eigenvalues and distribute them over assets.
+        D_spectrum = np.zeros(self.n)
+        D_spectrum[:self.r] = np.abs(np.random.standard_t(df=D_df, size=self.r))
+        np.random.shuffle(D_spectrum)
         self.D = spa.diags(D_spectrum, format='csc', dtype=float)
         self.mu = mu_scale * np.random.standard_normal(self.n)
         self.gamma = gamma

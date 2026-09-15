@@ -1,6 +1,7 @@
 """Checks for controlled sparse portfolio generation and its QP formulation."""
 
 import unittest
+from unittest.mock import patch
 
 import cvxpy as cp
 import numpy as np
@@ -13,8 +14,7 @@ from problem_classes.portfolio import PortfolioExample
 def make_portfolio(**overrides):
     parameters = dict(
         k=5, n=11, F_density=[0.5, 0.3], F_scale=1.5,
-        F_block_sizes=[(7, 2), (4, 3)],
-        D_spectrum=[4, 0, 0.25, 1, 2, 0, 8, 0.5, 0, 3, 1.5],
+        F_block_sizes=[(7, 2), (4, 3)], r=8,
         mu_scale=1.2, gamma=2.5, seed=7)
     parameters.update(overrides)
     return PortfolioExample(**parameters)
@@ -43,23 +43,27 @@ class PortfolioParameterTests(unittest.TestCase):
                 self.assertEqual(stats[f'density_{name}'], density)
                 self.assertEqual(stats[f'sparsity_{name}'], 1 - density)
 
-    def test_spectrum_rank_and_condition_numbers(self):
+    def test_student_t_absolute_values_and_condition_numbers(self):
         cases = (
-            ([4, 0.25, 1, 2], 4, 16, 16),
-            ([4, 0, 0.25, 0], 2, np.inf, 16),
-            ([0, 0, 0, 0], 0, np.inf, 1),
-            ([1e-20, 0, 2, 0], 2, np.inf, 2e20),
-            ([4, 8, 2, 3], 4, 8, 8),
-            ([0.5, 0.25, 0.125, 0.375], 4, 8, 8),
+            ([-4, 0.25, -1, 2], 4, 16, 16),
+            ([-4, 0.25], 2, np.inf, 16),
+            ([], 0, np.inf, 1),
+            ([-1e-20, 2], 2, np.inf, 2e20),
+            ([-4, 8, -2, 3], 4, 8, 8),
+            ([-0.5, 0.25, -0.125, 0.375], 4, 8, 8),
         )
         for values, rank, condition, positive_condition in cases:
-            with self.subTest(spectrum=values):
-                spectrum = np.array(values)
-                example = make_portfolio(
-                    k=2, n=4, F_block_sizes=[(4, 2)], F_density=[0.5],
-                    D_spectrum=spectrum)
-                np.testing.assert_array_equal(spectrum, values)
-                np.testing.assert_array_equal(example.D.diagonal(), values)
+            with self.subTest(samples=values):
+                with patch('problem_classes.portfolio.np.random.standard_t',
+                           return_value=np.array(values)) as sample:
+                    example = make_portfolio(
+                        k=2, n=4, F_block_sizes=[(4, 2)], F_density=[0.5],
+                        r=rank, D_df=2.5)
+                sample.assert_called_once_with(df=2.5, size=rank)
+                spectrum = example.D.diagonal()
+                np.testing.assert_array_equal(
+                    np.sort(spectrum),
+                    np.sort(np.r_[np.abs(values), np.zeros(4 - rank)]))
                 np.testing.assert_array_equal(
                     example.qp_problem['P'].diagonal(),
                     np.r_[2 * spectrum, [2, 2]])
@@ -70,6 +74,19 @@ class PortfolioParameterTests(unittest.TestCase):
                 self.assertEqual(stats['nnz_P'], rank + 2)
                 self.assertEqual(stats['P_condition_number'], condition)
                 self.assertEqual(stats['P_positive_condition_number'], positive_condition)
+
+    def test_sampled_D_has_requested_rank(self):
+        for rank in (0, 1, 10, 11):
+            for seed in (0, 1, 2):
+                with self.subTest(r=rank, seed=seed):
+                    example = make_portfolio(r=np.int64(rank), seed=seed)
+                    self.assertEqual(example.r, rank)
+                    self.assertEqual(example.D_df, 3.0)
+                    self.assertEqual(example.D.nnz, rank)
+                    self.assertTrue(np.all(example.D.data > 0))
+                    self.assertEqual(np.linalg.matrix_rank(example.D.toarray()), rank)
+                    self.assertEqual(example.generation_stats['D_rank'], rank)
+                    self.assertEqual(example.generation_stats['P_rank'], rank + example.k)
 
     def test_reproducibility_and_scales(self):
         base = make_portfolio()
@@ -85,7 +102,7 @@ class PortfolioParameterTests(unittest.TestCase):
         self.assertEqual(base.generation_stats, same.generation_stats)
         self.assertGreater((base.F - different.F).nnz, 0)
         self.assertFalse(np.array_equal(base.mu, different.mu))
-        np.testing.assert_array_equal(base.D.diagonal(), different.D.diagonal())
+        self.assertGreater((base.D - different.D).nnz, 0)
 
         scaled = make_portfolio(F_scale=3.0, mu_scale=3.6, gamma=5.0)
         np.testing.assert_array_equal(scaled.F.indptr, base.F.indptr)
@@ -100,14 +117,14 @@ class PortfolioParameterTests(unittest.TestCase):
     def test_blocks_share_a_random_stream(self):
         example = make_portfolio(
             k=6, n=12, F_block_sizes=[(6, 3), (6, 3)],
-            F_density=[0.5, 0.5], D_spectrum=np.ones(12))
+            F_density=[0.5, 0.5], r=12)
         self.assertGreater((example.F[:6, :3] - example.F[6:, 3:]).nnz, 0)
 
     def test_zero_and_full_density_and_zero_scale(self):
         for scale in (0.0, 2.0):
             with self.subTest(F_scale=scale):
                 example = make_portfolio(
-                    F_density=[0, 1], F_scale=scale, D_spectrum=np.zeros(11))
+                    F_density=[0, 1], F_scale=scale, r=0)
                 count = 0 if scale == 0 else 12
                 self.assertEqual(example.F.nnz, count)
                 self.assertEqual(np.count_nonzero(example.F.data), count)
@@ -151,13 +168,13 @@ class PortfolioParameterTests(unittest.TestCase):
 
     def test_default_asset_count_and_large_sparse_generation(self):
         default = make_portfolio(k=2, n=None, F_block_sizes=[(200, 2)],
-                                 F_density=[0.2], D_spectrum=np.ones(200))
+                                 F_density=[0.2], r=200)
         self.assertEqual(default.n, 200)
         self.assertEqual(default.F.shape, (200, 2))
         self.assertEqual(default.F.nnz, 80)
         large = make_portfolio(
             k=100, n=10000, F_block_sizes=[(6000, 60), (4000, 40)],
-            F_density=[0.005, 0.01], D_spectrum=np.tile([0, 0.25, 1, 4], 2500))
+            F_density=[0.005, 0.01], r=7500)
         qp = large.qp_problem
         self.assertEqual(large.F.nnz, 3400)
         self.assertEqual((qp['n'], qp['m']), (10100, 10101))
@@ -172,9 +189,8 @@ class PortfolioParameterTests(unittest.TestCase):
             dict(F_density=[0.5, 1.1]), dict(F_density=[np.nan, 0.5]),
             dict(F_block_sizes=[(6, 2), (4, 3)]),
             dict(F_block_sizes=[(7, 2), (4, 2)]),
-            dict(D_spectrum=np.ones(10)), dict(D_spectrum=np.ones((11, 1))),
-            dict(D_spectrum=[-1] + [1] * 10),
-            dict(D_spectrum=[np.nan] + [1] * 10),
+            dict(r=-1), dict(r=12), dict(r=2.5),
+            dict(D_df=0), dict(D_df=-1), dict(D_df=np.inf), dict(D_df=np.nan),
             dict(gamma=0), dict(gamma=-1), dict(gamma=np.inf),
         )
         for overrides in cases:

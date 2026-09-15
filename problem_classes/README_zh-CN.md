@@ -117,7 +117,7 @@ python3 -m venv .venv
 
 | 文件与构造方式 | 参数含义 | 最终 QP 规模 `(n_QP, m_QP)` |
 | --- | --- | --- |
-| [random_qp.py](random_qp.py)：`RandomQPExample(n, seed=1)` | `n` 为原始变量数 | `(n, 10*n)` |
+| [random_qp.py](random_qp.py)：`RandomQPExample(n, m, P_block_sizes, P_rank, P_lambda_max, P_cond_num, A_density, q_scale, slack_scale, seed=1)` | 独立指定变量数、约束数、分块、秩、谱上界及数据尺度 | `(n, m)` |
 | [eq_qp.py](eq_qp.py)：`EqQPExample(n, m=None, lower_density=0.15, seed=1, ...)` | `n` 为变量数；约束数 `m` 默认 `floor(n/2)` | `(n, m)` |
 | [portfolio.py](portfolio.py)：`PortfolioExample(k, seed=1, n=None)` | `k` 为因子数；资产数 `n` 默认 `100*k` | `(n+k, n+k+1)` |
 | [lasso.py](lasso.py)：`LassoExample(n, seed=1, m=None, ...)` | `n` 为特征数；样本数 `m` 默认 `100*n` | `(m+2*n, m+2*n)` |
@@ -126,6 +126,10 @@ python3 -m venv .venv
 | [control.py](control.py)：`ControlExample(n, seed=1)` | `nx=n`，`nu=floor(n/2)`，预测时域 `T=10` | `((T+1)*nx+T*nu, 2*(T+1)*nx+T*nu)` |
 
 使用明确的正整数尺寸，Eq QP 和 Control 从 `n>=2` 开始。Portfolio 自定义资产数时使用 `PortfolioExample(3, seed=1, n=60)`，其第二个位置参数是 seed。Control 当前不支持通过构造参数独立指定 `nx/nu/T`。
+
+Random QP 的 `n,m` 为独立正整数，`P_block_sizes` 为总和等于 `n` 的正整数序列，`1 <= P_rank <= n`。正特征值在 `[P_lambda_max/P_cond_num, P_lambda_max]` 均匀抽样；有限正数 `P_lambda_max` 和有限的 `P_cond_num >= 1` 都是上界，不要求取到。`P_cond_num` 控制非零谱条件数，秩亏时普通条件数为无穷大。
+
+`A_density` 取 `[0,1]`；有限的 `q_scale >= 0` 缩放 `range(P)` 内的高斯向量；有限的 `slack_scale > 0` 控制保存的可行点 `v` 处的代数松弛，不代表欧氏距离或最优解。`P_eigenvalues`、`P_lambda_max_actual`、`P_cond_num_actual` 记录生成的谱，`P_density_actual`、`A_density_actual` 及对应 sparsity 根据最终矩阵非零数统计。所有随机操作使用同一局部 RNG，具体实例与历史归档结果不同。
 
 Eq QP 支持 `1 <= m <= n`、`0 < lower_density <= 1`。density 同时作用于构造 `P` 的下部矩阵和约束矩阵 `A`，不是最终 `P` 的目标密度。可选的 `r`、`max_spectrum`、`max_cond_num` 分别控制 `P` 的秩、最大特征值上界，以及最大与最小正特征值之比的上界；上界不保证取到。Eq QP 的第二个位置参数现在是 `m`，请通过关键字传入 `seed`。
 
@@ -171,7 +175,10 @@ from problem_classes.svm import SVMExample
 from problem_classes.control import ControlExample
 
 instances = {
-    "random_qp": RandomQPExample(10, seed=1),
+    "random_qp": RandomQPExample(
+        n=10, m=100, P_block_sizes=[5, 5], P_rank=10,
+        P_lambda_max=10.0, P_cond_num=100.0, A_density=0.15,
+        q_scale=1.0, slack_scale=1.0, seed=1),
     "eq_qp": EqQPExample(10, seed=1),
     "portfolio": PortfolioExample(5, seed=1),
     "lasso": LassoExample(10, seed=1),

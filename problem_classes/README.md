@@ -117,7 +117,7 @@ Instances are **generated when the class constructor is called**, which also cre
 
 | File and constructor | Parameter meanings | Final QP size `(n_QP, m_QP)` |
 | --- | --- | --- |
-| [random_qp.py](random_qp.py): `RandomQPExample(n, seed=1)` | `n` is the original number of variables | `(n, 10*n)` |
+| [random_qp.py](random_qp.py): `RandomQPExample(n, m, P_block_sizes, P_rank, P_lambda_max, P_cond_num, A_density, q_scale, slack_scale, seed=1)` | Independent variable and constraint counts; block structure, rank, spectral bounds and data scales are explicit | `(n, m)` |
 | [eq_qp.py](eq_qp.py): `EqQPExample(n, m=None, lower_density=0.15, seed=1, ...)` | `n` is the number of variables; `m` defaults to `floor(n/2)` | `(n, m)` |
 | [portfolio.py](portfolio.py): `PortfolioExample(k, seed=1, n=None)` | `k` is the number of factors; the number of assets `n` defaults to `100*k` | `(n+k, n+k+1)` |
 | [lasso.py](lasso.py): `LassoExample(n, seed=1, m=None, ...)` | `n` is the number of features; the sample count `m` defaults to `100*n` | `(m+2*n, m+2*n)` |
@@ -126,6 +126,10 @@ Instances are **generated when the class constructor is called**, which also cre
 | [control.py](control.py): `ControlExample(n, seed=1)` | `nx=n`, `nu=floor(n/2)`, prediction horizon `T=10` | `((T+1)*nx+T*nu, 2*(T+1)*nx+T*nu)` |
 
 Use explicit positive integer sizes, starting at `n>=2` for Eq QP and Control. To specify a custom number of assets for Portfolio, use `PortfolioExample(3, seed=1, n=60)`; its second positional argument is the seed. Control currently does not support specifying `nx/nu/T` independently through constructor parameters.
+
+Random QP requires positive integer `n,m`, positive integer `P_block_sizes` summing to `n`, and `1 <= P_rank <= n`. Positive eigenvalues are sampled uniformly between `P_lambda_max/P_cond_num` and `P_lambda_max`: the positive finite spectral bound and finite `P_cond_num >= 1` need not be attained. `P_cond_num` bounds the nonzero spectral condition number; the ordinary condition number is infinite for rank-deficient `P`.
+
+`A_density` is in `[0,1]`; finite `q_scale >= 0` scales a Gaussian vector in `range(P)`; finite `slack_scale > 0` controls algebraic slack at the stored feasible point `v`, not an optimum or a Euclidean distance. `P_eigenvalues`, `P_lambda_max_actual` and `P_cond_num_actual` record the generated spectrum; `P_density_actual`, `A_density_actual` and their complementary sparsities use the final matrix nonzero counts. All random steps use one local RNG; the concrete instances differ from the archived results.
 
 Eq QP accepts `1 <= m <= n` and `0 < lower_density <= 1`. The density applies to the lower block used to construct `P` and to the constraint matrix `A`; it is not a target density for `P`. The optional `r`, `max_spectrum`, and `max_cond_num` control the rank of `P`, an eigenvalue upper bound, and an upper bound on the ratio of its largest to smallest positive eigenvalue. The bounds need not be attained. Pass `seed` by keyword: the second positional argument of Eq QP is now `m`.
 
@@ -171,7 +175,10 @@ from problem_classes.svm import SVMExample
 from problem_classes.control import ControlExample
 
 instances = {
-    "random_qp": RandomQPExample(10, seed=1),
+    "random_qp": RandomQPExample(
+        n=10, m=100, P_block_sizes=[5, 5], P_rank=10,
+        P_lambda_max=10.0, P_cond_num=100.0, A_density=0.15,
+        q_scale=1.0, slack_scale=1.0, seed=1),
     "eq_qp": EqQPExample(10, seed=1),
     "portfolio": PortfolioExample(5, seed=1),
     "lasso": LassoExample(10, seed=1),

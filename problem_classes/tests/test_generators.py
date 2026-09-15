@@ -183,12 +183,16 @@ def run_case(cls, size, seed):
     instance. For Control, also check dynamics stability and x0 bounds.
     """
     parameters = {}
-    if cls is ControlExample:
+    if cls is RandomQPExample:
+        parameters = dict(m=10 * size, P_block_sizes=[size // 2, size - size // 2],
+                          P_rank=size, P_lambda_max=10.0, P_cond_num=100.0,
+                          A_density=0.15, q_scale=1.0, slack_scale=1.0)
+    elif cls is ControlExample:
         parameters = dict(nu=size // 2)
     elif cls is PortfolioExample:
         parameters = dict(F_density=[0.5], F_scale=1.0,
                           F_block_sizes=[(100 * size, size)],
-                          D_spectrum=np.linspace(0.1, 1.0, 100 * size),
+                          r=100 * size,
                           mu_scale=1.0, gamma=1.0)
     elif cls is HuberExample:
         parameters = dict(m=100 * size, num_blocks=1,
@@ -227,8 +231,7 @@ def run_update(name):
     else:
         example = PortfolioExample(
             3, F_density=[0.5], F_scale=1.0, F_block_sizes=[(60, 3)],
-            D_spectrum=np.linspace(0.1, 1.0, 60), mu_scale=1.0,
-            gamma=1.0, seed=1, n=60)
+            r=60, mu_scale=1.0, gamma=1.0, seed=1, n=60)
     before = solve_and_check(example)
     if name == 'lasso_lambda':
         example.update_lambda(2 * example.lambda_param)

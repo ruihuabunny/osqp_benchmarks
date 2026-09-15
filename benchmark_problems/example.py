@@ -151,6 +151,14 @@ class Example(object):
         if EXAMPLES_MAP[self.name] is ControlExample:
             example_instance = ControlExample(nx=dimension, nu=dimension // 2,
                                               seed=instance_number)
+        elif EXAMPLES_MAP[self.name] is RandomQPExample:
+            example_instance = RandomQPExample(
+                n=dimension, m=10 * dimension,
+                P_block_sizes=[min(100, dimension - offset)
+                               for offset in range(0, dimension, 100)],
+                P_rank=dimension, P_lambda_max=10.0, P_cond_num=100.0,
+                A_density=0.15, q_scale=1.0, slack_scale=1.0,
+                seed=instance_number)
         else:
             example_instance = EXAMPLES_MAP[self.name](dimension,
                                                        instance_number)
